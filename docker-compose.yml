@@ -11,13 +11,17 @@ services:
     volumes:
       - ./:/var/www/html
     environment:
+      # artisan serve atiende una petición a la vez si no se le dan workers.
+      PHP_CLI_SERVER_WORKERS: 4
       APP_ENV: local
+      # Con debug activo, cualquier error muestra la traza y la configuración a quien abra la web.
+      APP_DEBUG: "${APP_DEBUG:-false}"
       DB_CONNECTION: pgsql
       DB_HOST: db
       DB_PORT: 5432
       DB_DATABASE: personal_finance
       DB_USERNAME: laravel
-      DB_PASSWORD: secret
+      DB_PASSWORD: "${DB_PASSWORD:-secret}"
       OLLAMA_TIMEOUT: 1200
     depends_on:
       db:
@@ -35,12 +39,14 @@ services:
       - ./:/var/www/html
     environment:
       APP_ENV: local
+      # Con debug activo, cualquier error muestra la traza y la configuración a quien abra la web.
+      APP_DEBUG: "${APP_DEBUG:-false}"
       DB_CONNECTION: pgsql
       DB_HOST: db
       DB_PORT: 5432
       DB_DATABASE: personal_finance
       DB_USERNAME: laravel
-      DB_PASSWORD: secret
+      DB_PASSWORD: "${DB_PASSWORD:-secret}"
       OLLAMA_TIMEOUT: 1200
     depends_on:
       db:
@@ -58,12 +64,14 @@ services:
       - ./:/var/www/html
     environment:
       APP_ENV: local
+      # Con debug activo, cualquier error muestra la traza y la configuración a quien abra la web.
+      APP_DEBUG: "${APP_DEBUG:-false}"
       DB_CONNECTION: pgsql
       DB_HOST: db
       DB_PORT: 5432
       DB_DATABASE: personal_finance
       DB_USERNAME: laravel
-      DB_PASSWORD: secret
+      DB_PASSWORD: "${DB_PASSWORD:-secret}"
       OLLAMA_TIMEOUT: 1200
     depends_on:
       db:
@@ -74,11 +82,12 @@ services:
     container_name: personal_finance_db
     restart: unless-stopped
     ports:
-      - "5433:5432"
+      # Solo desde la propia máquina: la base de datos no debe quedar abierta a la red.
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_DB: personal_finance
       POSTGRES_USER: laravel
-      POSTGRES_PASSWORD: secret
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-secret}"
       PGDATA: /var/lib/postgresql/data
     volumes:
       - pgdata:/var/lib/postgresql/data

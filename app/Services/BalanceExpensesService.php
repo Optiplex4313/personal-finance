@@ -12,6 +12,9 @@ class BalanceExpensesService
     /**
      * Ejecuta el servicio para cuadrar los gastos pendientes.
      *
+     * Las fechas se interpretan como días completos en la zona horaria de la app
+     * (config app.display_timezone): "hasta el 30" incluye todo el día 30.
+     *
      * @param Carbon|null $startDate
      * @param Carbon|null $endDate
      * @return array{matched_count:int, adjusted_count:int}
@@ -21,17 +24,19 @@ class BalanceExpensesService
         $query = Expense::withPendingSubexpenses();
         $matchedCount = 0;
         $adjustedCount = 0;
+        $timezone = config('app.display_timezone');
 
         if ($startDate) {
-            $query->where('date', '>=', $startDate);
+            $query->where('date', '>=', $this->localDay($startDate, $timezone)->startOfDay()->utc());
         }
 
         if ($endDate) {
-            $query->where('date', '<=', $endDate);
+            $query->where('date', '<=', $this->localDay($endDate, $timezone)->endOfDay()->utc());
         }
 
-        // Usamos chunk para procesar en lotes y no saturar la memoria
-        $query->chunk(100, function ($expenses) use (&$matchedCount, &$adjustedCount) {
+        // chunkById y no chunk: cada gasto ajustado deja de cumplir el filtro, y con
+        // chunk (paginación por OFFSET) se saltarían lotes enteros.
+        $query->chunkById(100, function ($expenses) use (&$matchedCount, &$adjustedCount) {
             DB::transaction(function () use ($expenses, &$matchedCount, &$adjustedCount) {
                 foreach ($expenses as $expense) {
                     // Verificamos nuevamente con la lógica exacta del modelo (diferencia > 10 céntimos)
@@ -48,6 +53,11 @@ class BalanceExpensesService
             'matched_count' => $matchedCount,
             'adjusted_count' => $adjustedCount,
         ];
+    }
+
+    private function localDay(Carbon $date, string $timezone): Carbon
+    {
+        return Carbon::parse($date->toDateString(), $timezone);
     }
 
     /**
@@ -77,6 +87,9 @@ class BalanceExpensesService
             'quantity'    => 1,
             'unit_price'  => $unitPrice,
             'movement_type' => MovementType::ADJUSTMENT,
+            'is_consumable' => false,
         ]);
+
+        $expense->forgetSubexpensesTotal();
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ExpenseItemType;
+use App\Enums\MovementType;
 use App\Enums\Recurrence;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -32,6 +33,7 @@ class ExpenseItem extends Model implements Commentable
         'recurrence',
         'projected_start_date',
         'actual_start_date',
+        'movement_type',
     ];
 
     protected $casts = [
@@ -45,6 +47,7 @@ class ExpenseItem extends Model implements Commentable
         'actual_start_date' => 'date',
         'item_type' => ExpenseItemType::class,
         'recurrence' => Recurrence::class,
+        'movement_type' => MovementType::class,
     ];
 
     public function expense(): BelongsTo

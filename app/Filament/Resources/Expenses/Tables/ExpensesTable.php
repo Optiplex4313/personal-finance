@@ -96,11 +96,11 @@ class ExpensesTable
                         return $query
                             ->when(
                                 $data['created_from'],
-                                fn (\Illuminate\Database\Eloquent\Builder $query, $date): \Illuminate\Database\Eloquent\Builder => $query->whereDate('date', '>=', $date),
+                                fn (\Illuminate\Database\Eloquent\Builder $query, $date): \Illuminate\Database\Eloquent\Builder => $query->where('date', '>=', \Illuminate\Support\Carbon::parse($date, config('app.display_timezone'))->startOfDay()->utc()),
                             )
                             ->when(
                                 $data['created_until'],
-                                fn (\Illuminate\Database\Eloquent\Builder $query, $date): \Illuminate\Database\Eloquent\Builder => $query->whereDate('date', '<=', $date),
+                                fn (\Illuminate\Database\Eloquent\Builder $query, $date): \Illuminate\Database\Eloquent\Builder => $query->where('date', '<=', \Illuminate\Support\Carbon::parse($date, config('app.display_timezone'))->endOfDay()->utc()),
                             );
                     }),
                 \Filament\Tables\Filters\TernaryFilter::make('has_ticket_photo')

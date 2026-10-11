@@ -10,6 +10,7 @@ use App\Models\Category;
 use App\Enums\OcrJobStatus;
 use App\Jobs\ProcessOcrJob;
 use App\Models\OcrJob;
+use App\Services\BalanceExpensesService;
 use Filament\Notifications\Notification;
 
 class ExpenseObserver
@@ -24,18 +25,21 @@ class ExpenseObserver
         {
             # Si el concepto equivale a una categoría ya creada en DB se asocia, si no queda vacio.
             $category = Category::where('name', $expense->singleItemConcept)->first();
-            $units = $expense->singleItemUnits ?? 1;
+            $units = max(1, (int) ($expense->singleItemUnits ?? 1));
 
             ExpenseItem::create([
                 'category_id' => $category?->id,
                 'expense_id' => $expense->id,
                 'concept' => $expense->singleItemConcept,
                 'quantity' => $units,
-                'unit_price' => $expense->total / $units,
+                'unit_price' => round((float) $expense->total / $units, 2),
                 'item_type' => ExpenseItemType::VARIABLE_IRREGULAR,
                 'recurrence' => Recurrence::NONE,
                 'is_consumable' => true,
             ]);
+
+            // Si el total no se divide exacto entre las unidades, el redondeo deja céntimos sueltos.
+            app(BalanceExpensesService::class)->createAdjustmentItem($expense);
 
             return;
         }

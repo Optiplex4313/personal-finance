@@ -82,6 +82,7 @@ class ExpenseForm
             TextInput::make('singleItemUnits')
                 ->label('Unidades del subgasto único')
                 ->numeric()
+                ->minValue(1)
                 ->step(1)
                 ->helperText('Específica las unidades del subgasto, por defecto 1. Se dividirá el importe total del gasto entre las unidades para calcular el precio unitario.')
                 ->dehydrated(function ($livewire): bool {

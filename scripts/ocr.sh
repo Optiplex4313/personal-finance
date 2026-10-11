@@ -35,33 +35,29 @@ else
   exit 1
 fi
 
-# 1. Creamos un archivo temporal para la imagen con extensión .png
+# 1. Creamos los archivos temporales y los borramos al salir, también si algo falla:
+#    contienen la foto del ticket.
 TMP_IMG=$(mktemp --suffix=.png)
+TMP_PAYLOAD=$(mktemp)
+trap 'rm -f "$TMP_PAYLOAD" "$TMP_IMG"' EXIT
 
-# 2. Redimensionamos a 1024x1024 y rellenamos el sobrante con blanco
+# 2. Reducimos solo si es más grande, sin deformar ni rellenar a cuadrado: un ticket
+#    largo metido en 1024x1024 quedaba con el texto diminuto.
 # Dependiendo de tu versión de ImageMagick, el comando es 'convert' (v6) o 'magick' (v7)
 "${IM_CONVERT[@]}" "$TICKET_PATH" \
-  -resize 1024x1024 \
-  -background white \
-  -gravity center \
-  -extent 1024x1024 \
+  -auto-orient \
+  -resize '1024x2048>' \
   "$TMP_IMG"
 
 # 3. Convertimos la imagen TEMPORAL a Base64
 IMG="$(base64 -w 0 "$TMP_IMG")"
 # ------------------------------------------------------
 
-# Creamos un archivo temporal para el payload JSON
-TMP_PAYLOAD=$(mktemp)
-
 ESCAPED_PROMPT=$(printf '%s' "$OCR_PROMPT" | sed 's/\\/\\\\/g; s/"/\\"/g')
 printf '{"model":"%s","prompt":"%s","format":"json","images":["%s"],"stream":false}' \
   "$OCR_MODEL" "$ESCAPED_PROMPT" "$IMG" > "$TMP_PAYLOAD"
 
 # Enviamos el archivo temporal con curl usando -d @
-curl -s "$OCR_URL" \
+curl -sS --fail-with-body "$OCR_URL" \
   -H "Content-Type: application/json" \
   --data-binary @"$TMP_PAYLOAD"
-
-# Limpieza: Borramos el payload JSON y la imagen temporal
-rm -f "$TMP_PAYLOAD" "$TMP_IMG"

@@ -66,6 +66,11 @@ class Expense extends Model implements Commentable
         return $this->subexpensesTotalCache;
     }
 
+    public function forgetSubexpensesTotal(): void
+    {
+        $this->subexpensesTotalCache = null;
+    }
+
     public function hasPendingSubexpenses(): bool
     {
         if ($this->total === null) {

@@ -155,6 +155,19 @@ def prepare_dependencies(children: Children) -> None:
             log(f"AVISO: sin Ollama, el OCR de tickets no funcionará ({e})")
 
 
+def ensure_admin_user() -> None:
+    """Sin usuario no se puede entrar al panel: lo crea a partir de PF_ADMIN_EMAIL/PF_ADMIN_PASSWORD."""
+    email = os.environ.get("PF_ADMIN_EMAIL")
+    if not email:
+        log("AVISO: sin PF_ADMIN_EMAIL no se crea ningún usuario; si la base está vacía no podrás iniciar sesión.")
+        return
+    if not os.environ.get("PF_ADMIN_PASSWORD"):
+        log("AVISO: PF_ADMIN_EMAIL sin PF_ADMIN_PASSWORD; no se crea el usuario.")
+        return
+    # El comando no toca un usuario que ya exista.
+    artisan("app:ensure-user", email, "--no-interaction", check=False)
+
+
 def main() -> int:
     os.environ.setdefault("DB_CONNECTION", "pgsql")
 
@@ -195,8 +208,14 @@ def main() -> int:
         else:
             raise SystemExit("[pf] La base de datos no aceptó las migraciones.")
 
+        ensure_admin_user()
+
+        # artisan serve atiende una petición a la vez si no se le dan workers.
+        os.environ.setdefault("PHP_CLI_SERVER_WORKERS", "4")
         procs.append(subprocess.Popen(["php", "artisan", "serve", "--host=0.0.0.0", "--port=8080"]))
         procs.append(subprocess.Popen(["php", "artisan", "queue:work", "--sleep=3", "--tries=3"]))
+        # Backups diarios de la base de datos (routes/console.php).
+        procs.append(subprocess.Popen(["php", "artisan", "schedule:work", "--no-interaction"]))
     except SystemExit as e:
         log(str(e.code))
         shutdown(1)

@@ -92,9 +92,9 @@ class AdminPanelProvider extends PanelProvider
                 ->persistSearchInSession()
                 ->persistSortInSession()
                 ->reorderableColumns()
-                ->deferColumnManager(false)
-                ->striped()
-                ->poll('5s');
+                ->deferColumnManager(false);
+            // Sin poll global: cada tabla abierta consultaba la base de datos cada 5 s.
+            // Las vistas que lo necesitan (OCR) declaran su propio poll.
         });
     }
 }

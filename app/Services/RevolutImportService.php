@@ -18,19 +18,16 @@ class RevolutImportService
 {
     private const LOG_PREFIX = '[RevolutImportService]';
 
-    /**
-     * Índice en memoria para detectar duplicados dentro de la misma importación y base de datos.
-     * @var array<string, array<string, bool>>
-     */
-    private array $duplicateIndex = [];
+    private const CURRENCY = 'EUR';
 
     /**
-     * Registro de fechas ya consultadas en la base de datos para evitar consultas repetitivas (N+1).
-     * @var array<string, bool>
+     * Gastos ya guardados que aún pueden casar con una fila del CSV, por día local y
+     * total en céntimos. Cada fila duplicada consume uno: dos cafés de 1,50 € el mismo
+     * día son dos gastos, y reimportar el mismo CSV no crea ninguno.
+     *
+     * @var array<string, array<int, array<int, array{id: string, manual: bool}>>>
      */
-    private array $loadedDates = [];
-
-    private array $manuallyAddedSummary = [];
+    private array $existingExpenses = [];
 
     /**
      * @return array{
@@ -68,10 +65,14 @@ class RevolutImportService
 
         $summary = [
             'imported_count' => 0,
+            'skipped_count' => 0,
+            'skipped' => [],
             'skipped_duplicate_count' => 0,
             'skipped_duplicates' => [],
             'duplicates_report_path' => null,
         ];
+
+        $this->existingExpenses = [];
 
         DB::transaction(function () use ($rows, $csvPath, $leaveSubexpensesEmpty, $allowDuplicates, &$summary): void {
             foreach ($rows as $row) {
@@ -82,27 +83,45 @@ class RevolutImportService
                     continue;
                 }
 
-                $signedTotal = $this->normalizeMoney($row['Amount'] ?? null);
+                $amountCents = $this->moneyToCents($row['Amount'] ?? null);
 
-                // Si es Transferencia, solo agregamos los Gastos (transferencias negativas)
-                if ($type === 'Transfer' && $signedTotal >= 0) {
+                // Transferencias entrantes: son ingresos, no gastos.
+                if ($type === 'Transfer' && $amountCents >= 0) {
                     continue;
                 }
 
                 $description = $this->normalizeDescription($row['Description'] ?? null);
                 $date = $this->parseDate($row['Started Date'] ?? null);
-                
-                // Convertimos a valor absoluto para registrar el gasto
-                $total = abs($signedTotal);
-                $formattedTotal = number_format($total, 2, '.', '');
 
-                if (! $allowDuplicates && $this->isDuplicateExpense($date, $total)) {
+                $skipReason = $this->skipReason($row, $type, $amountCents);
+
+                if ($skipReason !== null) {
+                    $summary['skipped_count']++;
+                    $summary['skipped'][] = [
+                        'line' => $row['__line'],
+                        'date' => $date->toDateString(),
+                        'description' => $description,
+                        'amount' => $this->formatCents($amountCents),
+                        'reason' => $skipReason,
+                    ];
+
+                    continue;
+                }
+
+                // La comisión se cobra aparte del importe: el gasto real es la suma.
+                $feeCents = abs($this->moneyToCents($row['Fee'] ?? '0', allowEmpty: true));
+                $totalCents = -$amountCents + $feeCents;
+                $formattedTotal = $this->formatCents($totalCents);
+
+                if (! $allowDuplicates && ($match = $this->takeExistingExpense($date, $totalCents)) !== null) {
                     $summary['skipped_duplicate_count']++;
                     $summary['skipped_duplicates'][] = [
                         'line' => $row['__line'],
                         'date' => $date->toDateString(),
                         'description' => $description,
                         'total' => $formattedTotal,
+                        'existing_expense_id' => $match['id'],
+                        'manual_expense_id' => $match['manual'] ? $match['id'] : null,
                     ];
 
                     continue;
@@ -114,7 +133,7 @@ class RevolutImportService
 
                 $expense = Expense::query()->create([
                     'establishment_id' => $establishment->id,
-                    'date' => $date,
+                    'date' => $date->copy()->utc(),
                     'total' => $formattedTotal,
                     'import_csv_path' => $csvPath,
                     'status' => ExpenseStatus::PAID,
@@ -138,16 +157,12 @@ class RevolutImportService
                 }
 
                 $summary['imported_count']++;
-
-                if (! $allowDuplicates) {
-                    $this->markDuplicateExpense($date, $total);
-                }
             }
         });
 
         // Almacenamiento de duplicados en un JSON si existen elementos omitidos
         if ($summary['skipped_duplicate_count'] > 0) {
-            $summary['duplicates_report_path'] = $this->saveDuplicatesReport($disk, $csvPath, $this->manuallyAddedSummary);
+            $summary['duplicates_report_path'] = $this->saveDuplicatesReport($disk, $csvPath, $summary['skipped_duplicates']);
         }
 
         Log::info(self::LOG_PREFIX . ' Importación de Revolut completada', [
@@ -270,24 +285,81 @@ class RevolutImportService
         return $description;
     }
 
-    private function normalizeMoney(mixed $value): float
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function skipReason(array $row, string $type, int $amountCents): ?string
     {
-        $normalized = trim((string) $value);
+        // Pagos revertidos, rechazados o aún pendientes no son gasto (todavía).
+        $state = strtoupper($this->normalizeText($row['State'] ?? 'COMPLETED'));
+        if ($state !== 'COMPLETED') {
+            return 'not_completed';
+        }
+
+        $currency = strtoupper($this->normalizeText($row['Currency'] ?? self::CURRENCY));
+        if ($currency !== '' && $currency !== self::CURRENCY) {
+            return 'currency';
+        }
+
+        // Un pago con tarjeta en positivo es un reembolso: no es un gasto.
+        if ($type === 'Card Payment' && $amountCents >= 0) {
+            return 'refund';
+        }
+
+        return null;
+    }
+
+    /**
+     * Convierte un importe del CSV a céntimos sin pasar por float.
+     * Acepta "-12.34", "12,34", "-1,234.56" y "1.234,56".
+     */
+    private function moneyToCents(mixed $value, bool $allowEmpty = false): int
+    {
+        $normalized = str_replace(['€', ' ', "\u{00A0}"], '', trim((string) $value));
 
         if ($normalized === '') {
+            if ($allowEmpty) {
+                return 0;
+            }
+
             throw new RuntimeException('El importe del movimiento no puede estar vacío.');
         }
 
-        $normalized = str_replace(['€', ' '], '', $normalized);
-        $normalized = str_replace(',', '.', $normalized);
+        $lastDot = strrpos($normalized, '.');
+        $lastComma = strrpos($normalized, ',');
+        $decimalSeparator = ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) ? ',' : '.';
+        $thousandsSeparator = $decimalSeparator === ',' ? '.' : ',';
 
-        if (! is_numeric($normalized)) {
+        $normalized = str_replace($thousandsSeparator, '', $normalized);
+        $normalized = str_replace($decimalSeparator, '.', $normalized);
+
+        if (! preg_match('/^([+-]?)(\d+)(?:\.(\d*))?$/', $normalized, $matches)) {
             throw new RuntimeException("Importe inválido: {$value}");
         }
 
-        return (float) $normalized;
+        $sign = $matches[1] === '-' ? -1 : 1;
+        $fraction = str_pad($matches[3] ?? '', 3, '0');
+        $cents = ((int) $matches[2]) * 100 + (int) substr($fraction, 0, 2);
+
+        // Redondeo a céntimo, mitad hacia arriba.
+        if ((int) $fraction[2] >= 5) {
+            $cents++;
+        }
+
+        return $sign * $cents;
     }
 
+    private function formatCents(int $cents): string
+    {
+        $sign = $cents < 0 ? '-' : '';
+        $cents = abs($cents);
+
+        return sprintf('%s%d.%02d', $sign, intdiv($cents, 100), $cents % 100);
+    }
+
+    /**
+     * Revolut exporta la hora local de la cuenta; se guarda en UTC.
+     */
     private function parseDate(mixed $value): Carbon
     {
         $rawDate = trim((string) $value);
@@ -296,73 +368,46 @@ class RevolutImportService
             throw new RuntimeException('La fecha de inicio del movimiento no puede estar vacía.');
         }
 
-        $date = Carbon::createFromFormat('Y-m-d H:i:s', $rawDate);
+        $date = Carbon::createFromFormat('Y-m-d H:i:s', $rawDate, config('app.display_timezone'));
 
-        if ($date === false) {
+        if ($date === false || $date === null) {
             throw new RuntimeException("Fecha inválida: {$rawDate}");
         }
 
         return $date;
     }
 
-    private function isDuplicateExpense(Carbon $date, float $total): bool
+    /**
+     * @return array{id: string, manual: bool}|null
+     */
+    private function takeExistingExpense(Carbon $localDate, int $totalCents): ?array
     {
-        $formattedTotal = number_format($total, 2, '.', '');
-        
-        // Ampliamos el rango a fecha_csv +/- 1 día
-        $targetDates = [
-            // $date->copy()->subDay()->toDateString(),
-            $date->toDateString(),
-            // $date->copy()->addDay()->toDateString(),
-        ];
+        $day = $localDate->toDateString();
 
-        foreach ($targetDates as $targetDate) {
-            // Lazy load para cada fecha en el rango para evitar consultas constantes
-            if (! isset($this->loadedDates[$targetDate])) {
-                $this->loadedDates[$targetDate] = true;
-                $this->duplicateIndex[$targetDate] = $this->duplicateIndex[$targetDate] ?? [];
+        if (! isset($this->existingExpenses[$day])) {
+            $this->existingExpenses[$day] = [];
+            $timezone = config('app.display_timezone');
 
-                Expense::query()
-                    ->whereDate('date', $targetDate)
-                    ->whereNotNull('total')
-                    ->get(['total', 'import_csv_path', 'id'])
-                    ->each(function (Expense $expense) use ($targetDate): void {
-                        $manually_added = ! isset($expense->import_csv_path) || $expense->import_csv_path === null;
-                        $totalStr = number_format((float) $expense->total, 2, '.', '');
-                        $this->duplicateIndex[$targetDate][$totalStr] = true;
-                        if ($manually_added) {
-                            $this->manuallyAddedIndex[$targetDate][$totalStr] = $expense->id;
-                        }
-                    });
-            }
-
-            // Comprobación exacta con dos decimales en memoria
-            if (isset($this->duplicateIndex[$targetDate][$formattedTotal])) {
-                // Si se encuentra en agreagas manualmente, se agrega manuallyAddedSummary
-                if (isset($this->manuallyAddedIndex[$targetDate][$formattedTotal])) {
-                    $this->manuallyAddedSummary[] = [
-                        'date' => $date,
-                        'targetDate' => $targetDate,
-                        'total' => $formattedTotal,
-                        'expense_id' => $this->manuallyAddedIndex[$targetDate][$formattedTotal],
+            Expense::query()
+                ->whereBetween('date', [
+                    Carbon::parse($day, $timezone)->startOfDay()->utc(),
+                    Carbon::parse($day, $timezone)->endOfDay()->utc(),
+                ])
+                ->whereNotNull('total')
+                ->orderBy('date')
+                ->get(['id', 'total', 'import_csv_path'])
+                ->each(function (Expense $expense) use ($day): void {
+                    $this->existingExpenses[$day][$this->moneyToCents($expense->total)][] = [
+                        'id' => $expense->id,
+                        'manual' => $expense->import_csv_path === null,
                     ];
-                }
-                return true;
-            }
+                });
         }
 
-        return false;
-    }
-
-    private function markDuplicateExpense(Carbon $date, float $total): void
-    {
-        $formattedTotal = number_format($total, 2, '.', '');
-        $dateStr = $date->toDateString();
-        
-        if (! isset($this->duplicateIndex[$dateStr])) {
-            $this->duplicateIndex[$dateStr] = [];
+        if (empty($this->existingExpenses[$day][$totalCents])) {
+            return null;
         }
-        
-        $this->duplicateIndex[$dateStr][$formattedTotal] = true;
+
+        return array_shift($this->existingExpenses[$day][$totalCents]);
     }
 }

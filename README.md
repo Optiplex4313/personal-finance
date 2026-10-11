@@ -161,4 +161,26 @@ Para hacer backup manual:
 docker exec -i personal_finance_db env PGPASSWORD=secret pg_dump -U laravel -d personal_finance | gzip > backup.sql.gz
 """
 
+USUARIOS
+
+Crear un usuario (no modifica uno existente). La contraseña se lee de `PF_ADMIN_PASSWORD` o se pregunta, mínimo 12 caracteres:
+"""
+php artisan app:ensure-user tu@email.com --name="Tu nombre"
+"""
+
+En Celaut, `pf-entrypoint` lo hace al arrancar si se pasan `PF_ADMIN_EMAIL` y `PF_ADMIN_PASSWORD` (`nodo execute -e ...`).
+
+`php artisan db:seed` crea los usuarios de ejemplo con la contraseña de `SEED_PASSWORD`, o con una aleatoria que muestra por consola.
+
+TESTS
+
+Los tests usan PostgreSQL (enums nativos y columnas generadas), no SQLite. Por defecto esperan una base `personal_finance_test` en `127.0.0.1:5432` con usuario `laravel` / `secret` (ver `phpunit.xml`; se puede sobrescribir con variables de entorno `DB_*`):
+"""
+docker compose up -d db
+docker exec -i personal_finance_db psql -U laravel -d personal_finance -c 'CREATE DATABASE personal_finance_test'
+DB_PORT=5433 php artisan test
+"""
+
+Los tests de `tests/Feature/Payments` cubren el dinero: cuadre de gastos y ajustes, importación de Revolut (estados, reembolsos, comisiones, divisa, duplicados, céntimos), OCR, stock y analíticas por mes en hora local.
+
 Todas las escrituras críticas se ejecutan dentro de transacciones Laravel. Las consultas pesadas utilizan materialized views. El sistema está preparado para Filament Resources y Actions.

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Expenses\Schemas;
 
 use App\Filament\Resources\Categories\Schemas\CategoryForm;
 use App\Enums\ExpenseItemType;
+use App\Enums\MovementType;
 use App\Enums\Recurrence;
 use App\Models\Category;
 use Filament\Forms\Components\DatePicker;
@@ -60,6 +61,12 @@ class ExpenseItemForm
             ->live()
             ->createOptionForm(CategoryForm::components())
             ->editOptionForm(CategoryForm::components());
+        $conceptSectionSchema[] = Select::make('movement_type')
+            ->label('Tipo de movimiento')
+            ->helperText('Compra suma al stock; consumo y pérdida restan (usa precio 0). Los ajustes los crea el cuadre automático.')
+            ->options(MovementType::class)
+            ->default(MovementType::PURCHASE->value)
+            ->required();
         $conceptSectionSchema[] = TextInput::make('concept')
             ->label('Concepto')
             ->columnSpanFull();

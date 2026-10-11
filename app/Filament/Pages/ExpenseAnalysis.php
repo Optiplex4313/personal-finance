@@ -119,7 +119,7 @@ class ExpenseAnalysis extends Dashboard
                 ->searchable()
                 ->options(function () {
                     $options = [];
-                    $start = Carbon::now()->startOfMonth();
+                    $start = Carbon::now(config('app.display_timezone'))->startOfMonth();
 
                     // Generamos los últimos 24 meses de manera dinámica
                     for ($i = 0; $i < 24; $i++) {

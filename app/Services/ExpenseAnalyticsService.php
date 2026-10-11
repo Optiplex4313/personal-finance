@@ -123,13 +123,12 @@ class ExpenseAnalyticsService
                 filled($filters['month'] ?? null),
                 function (Builder $query) use ($filters) {
                     try {
-                        $date = CarbonImmutable::parse($filters['month'] . '-01');
-                        
-                        // CAMBIO AQUÍ: Usamos toDateTimeString() para incluir las horas límites
-                        return $query->whereBetween('expenses.date', [
-                            $date->startOfMonth()->toDateTimeString(), // 2026-06-01 00:00:00
-                            $date->endOfMonth()->toDateTimeString(),   // 2026-06-30 23:59:59
-                        ]);
+                        // El mes es el mes local (app.display_timezone); las fechas se guardan en UTC.
+                        $date = CarbonImmutable::parse($filters['month'] . '-01', config('app.display_timezone'));
+
+                        return $query
+                            ->where('expenses.date', '>=', $date->startOfMonth()->utc())
+                            ->where('expenses.date', '<', $date->startOfMonth()->addMonth()->utc());
                     } catch (\Throwable) {
                         return $query;
                     }

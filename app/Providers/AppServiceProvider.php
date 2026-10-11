@@ -24,7 +24,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        FilamentTimezone::set('Europe/Madrid');
+        FilamentTimezone::set(config('app.display_timezone'));
 
         // Observers
         Expense::observe(ExpenseObserver::class);

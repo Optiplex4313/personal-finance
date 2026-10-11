@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Expenses\Pages;
 
 use App\Filament\Resources\Expenses\ExpenseResource;
+use App\Models\Expense;
 use App\Services\RevolutImportService;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -107,14 +108,14 @@ class ListExpenses extends ListRecords
                             'application/csv',
                             'application/vnd.ms-excel',
                         ])
-                        ->helperText('El archivo se guardará en storage/app/private/imports. Solo se importarán filas de tipo "Pago con tarjeta".'),
+                        ->helperText('El archivo se guardará en storage/app/private/imports. Se importan pagos con tarjeta y transferencias salientes completados en EUR (incluida la comisión).'),
                     Toggle::make('leave_subexpenses_empty')
                         ->label('Dejar subgastos vacíos')
                         ->helperText('Si está activo, se crearán gastos sin subgasto único.')
                         ->default(false),
                     Toggle::make('allow_duplicates')
                         ->label('Desactivar omisión de duplicados')
-                        ->helperText('Si está activo, se importarán también gastos que ya existan en el mismo día con el mismo total redondeado.')
+                        ->helperText('Si está activo, se importarán también gastos que ya existan en el mismo día con el mismo total.')
                         ->default(false),
                 ])
                 ->action(function (array $data): void {
@@ -135,14 +136,32 @@ class ListExpenses extends ListRecords
                             (bool) ($data['allow_duplicates'] ?? false),
                         );
 
+                        if ($summary['skipped_count'] > 0) {
+                            $reasons = [
+                                'refund' => 'reembolsos',
+                                'not_completed' => 'no completados',
+                                'currency' => 'en otra divisa',
+                            ];
+
+                            Notification::make()
+                                ->warning()
+                                ->title('Movimientos no importados')
+                                ->body(collect($summary['skipped'])
+                                    ->countBy('reason')
+                                    ->map(fn (int $count, string $reason): string => sprintf('%d %s', $count, $reasons[$reason] ?? $reason))
+                                    ->implode(', ') . '.')
+                                ->persistent()
+                                ->send();
+                        }
+
                         if ($summary['skipped_duplicate_count'] > 0) {
                             $skippedPreview = array_slice($summary['skipped_duplicates'], 0, 3);
                             $skippedText = collect($skippedPreview)
                                 ->map(fn (array $item): string => sprintf(
-                                    '%s %s (%s €)',
+                                    '%s %s (%s)',
                                     $item['date'],
                                     $item['description'],
-                                    number_format((float) $item['rounded_total'], 0, ',', '.'),
+                                    Expense::formatMoney($item['total']),
                                 ))
                                 ->implode('; ');
 
@@ -154,7 +173,7 @@ class ListExpenses extends ListRecords
                                 ->warning()
                                 ->title('Importación completada con duplicados omitidos')
                                 ->body(sprintf(
-                                    'Se importaron %d gastos y se omitieron %d duplicados por día y total redondeado. %s',
+                                    'Se importaron %d gastos y se omitieron %d duplicados (mismo día y mismo total). %s',
                                     $summary['imported_count'],
                                     $summary['skipped_duplicate_count'],
                                     $skippedText !== '' ? 'Ejemplos: ' . $skippedText : '',

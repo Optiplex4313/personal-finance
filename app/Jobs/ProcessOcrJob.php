@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\MovementType;
 use App\Enums\OcrJobStatus;
 use App\Models\OcrJob;
 use App\Services\OcrService;
@@ -20,8 +21,20 @@ class ProcessOcrJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    /**
+     * Un OCR fallido no se reintenta solo: el gasto queda marcado y el usuario decide.
+     */
+    public int $tries = 1;
+
+    /**
+     * Segundos. Debe superar services.ollama.timeout y quedar por debajo del
+     * retry_after de la cola; si no, otro worker podría coger el mismo OCR a la vez.
+     */
+    public int $timeout;
+
     public function __construct(public string $ocrJobId)
     {
+        $this->timeout = (int) config('services.ollama.timeout', 1200) + 60;
     }
 
     public function handle(OcrService $ocrService): void
@@ -58,7 +71,6 @@ class ProcessOcrJob implements ShouldQueue
                 throw new \RuntimeException('Esto no debería llegar a ocurrir. Este gasto ya tiene líneas. Borra las líneas antes de ejecutar OCR.');
             }
 
-            \Log::info(json_encode($expense));
             $count = $ocrService->importExpenseItemsFromTicketOcr($expense);
 
             $ocrJob->forceFill([
@@ -82,6 +94,30 @@ class ProcessOcrJob implements ShouldQueue
 
             throw $e;
         }
+    }
+
+    /**
+     * Se llama también cuando el worker mata el job (timeout) o este muere sin pasar
+     * por el catch de handle(): sin esto el OcrJob se quedaría en PENDING para siempre.
+     */
+    public function failed(?Throwable $e): void
+    {
+        $ocrJob = OcrJob::query()->with('user')->find($this->ocrJobId);
+
+        if (!$ocrJob || $ocrJob->status !== OcrJobStatus::PENDING) {
+            return;
+        }
+
+        $e ??= new \RuntimeException('El proceso de OCR terminó de forma inesperada.');
+
+        $ocrJob->forceFill([
+            'status' => OcrJobStatus::FAILED,
+            'finished_at' => now(),
+            'error_message' => $e->getMessage(),
+            'error_trace' => $e->getTraceAsString(),
+        ])->save();
+
+        $this->notifyFailure($ocrJob, $e);
     }
 
     private function notifySuccess(OcrJob $ocrJob, int $count): void

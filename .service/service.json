@@ -50,7 +50,10 @@
         "MAIL_MAILER",
         "OLLAMA_URL",
         "OLLAMA_OCR_MODEL",
-        "OLLAMA_TIMEOUT"
+        "OLLAMA_TIMEOUT",
+        "APP_DISPLAY_TIMEZONE",
+        "PF_ADMIN_EMAIL",
+        "PF_ADMIN_PASSWORD"
     ],
     "possible_environment_workload": [
         {

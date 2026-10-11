@@ -27,6 +27,9 @@ class ExpenseItemsTable
                 TextColumn::make('concept')
                     ->label('Concepto')
                     ->searchable(),
+                TextColumn::make('movement_type')
+                    ->label('Movimiento')
+                    ->badge(),
                 TextColumn::make('quantity')
                     ->label('Cantidad')
                     ->numeric()

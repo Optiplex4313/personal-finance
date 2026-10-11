@@ -32,7 +32,7 @@ class ProcessOcr extends Command
         $this->info('Ejecutando comando de procesamiento de OCR de prueba...');
 
         $expense = Expense::first(); // Solo para prueba, en la realidad deberías obtener el gasto relacionado al OCR Job
-        $service = new OcrService();
+        $service = app(OcrService::class);
         $service->importExpenseItemsFromTicketOcr($expense);
 
         $this->info("Finalizado.");

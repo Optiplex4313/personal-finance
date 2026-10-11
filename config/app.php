@@ -67,6 +67,11 @@ return [
 
     'timezone' => 'UTC',
 
+    // Zona horaria en la que se muestran las fechas y se interpretan los días
+    // (filtros por mes, rangos "desde/hasta", fechas del CSV de Revolut).
+    // Las fechas se guardan siempre en UTC.
+    'display_timezone' => env('APP_DISPLAY_TIMEZONE', 'Europe/Madrid'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration

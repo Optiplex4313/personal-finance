@@ -2,6 +2,8 @@
 
 namespace App\Providers\Filament;
 
+use App\Http\Controllers\OcrProviderController;
+use Illuminate\Support\Facades\Route;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -30,6 +32,10 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('')
             ->login()
+            ->authenticatedRoutes(function (): void {
+                Route::post('/ocr-service', [OcrProviderController::class, 'store'])->name('ocr-service.store');
+                Route::delete('/ocr-service', [OcrProviderController::class, 'destroy'])->name('ocr-service.destroy');
+            })
             ->spa()
             ->databaseNotifications()
             ->globalSearchKeyBindings(['mod+shift+k'])

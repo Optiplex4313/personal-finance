@@ -22,7 +22,8 @@ services:
       DB_DATABASE: personal_finance
       DB_USERNAME: laravel
       DB_PASSWORD: "${DB_PASSWORD:-secret}"
-      OLLAMA_TIMEOUT: 1200
+      OCR_TIMEOUT: 1200
+      OCR_SERVICE_URL: "${OCR_SERVICE_URL:-}"
     depends_on:
       db:
         condition: service_healthy
@@ -47,7 +48,8 @@ services:
       DB_DATABASE: personal_finance
       DB_USERNAME: laravel
       DB_PASSWORD: "${DB_PASSWORD:-secret}"
-      OLLAMA_TIMEOUT: 1200
+      OCR_TIMEOUT: 1200
+      OCR_SERVICE_URL: "${OCR_SERVICE_URL:-}"
     depends_on:
       db:
         condition: service_healthy
@@ -72,7 +74,8 @@ services:
       DB_DATABASE: personal_finance
       DB_USERNAME: laravel
       DB_PASSWORD: "${DB_PASSWORD:-secret}"
-      OLLAMA_TIMEOUT: 1200
+      OCR_TIMEOUT: 1200
+      OCR_SERVICE_URL: "${OCR_SERVICE_URL:-}"
     depends_on:
       db:
         condition: service_healthy

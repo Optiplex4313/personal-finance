@@ -20,7 +20,6 @@ COPY ./database ./database
 COPY ./public ./public
 COPY ./resources ./resources
 COPY ./routes ./routes
-COPY ./scripts ./scripts
 COPY ./artisan ./artisan
 
 # --no-scripts: no arranca Laravel (package:discover, filament:upgrade) durante el
@@ -43,7 +42,6 @@ RUN apt-get update \
         postgresql-client-18 \
         python3 \
         python3-venv \
-        imagemagick \
         libpq-dev \
         libzip-dev \
         libicu-dev \
@@ -76,13 +74,13 @@ RUN python3 -m venv /opt/pf-venv \
         https://github.com/bee-rpc-protocol/celaut-service-libraries/archive/23459eea47351c75cffffa9318049aad8810ea75.tar.gz \
     && /opt/pf-venv/bin/python -c "from bee_rpc import client; from node_controller.controller.controller import Controller; print('node_controller ok')"
 
-# Dependencias Celaut empaquetadas por el packer (pf-postgres, pf-ollama) y sus hashes.
+# Dependencias Celaut empaquetadas por el packer (pf-postgres) y sus hashes.
 COPY ./__services__ /app/__services__
 COPY ./__metadata__ /app/__metadata__
 COPY ./__block__ /app/__block__
 COPY ./.dependencies /app/.dependencies
 
-RUN chmod +x /usr/local/bin/pf-entrypoint scripts/ocr.sh \
+RUN chmod +x /usr/local/bin/pf-entrypoint \
     && mkdir -p \
         storage/app/private \
         storage/framework/cache/data \

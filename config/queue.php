@@ -40,8 +40,8 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            // Por encima del timeout de ProcessOcrJob (OLLAMA_TIMEOUT + 60).
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', (int) env('OLLAMA_TIMEOUT', 1200) + 300),
+            // Por encima del timeout de ProcessOcrJob (OCR_TIMEOUT + 60).
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', (int) env('OCR_TIMEOUT', 1200) + 300),
             'after_commit' => false,
         ],
 

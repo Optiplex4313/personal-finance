@@ -181,6 +181,13 @@ docker exec -i personal_finance_db psql -U laravel -d personal_finance -c 'CREAT
 DB_PORT=5433 php artisan test
 """
 
+## OCR de tickets
+
+El OCR no va dentro de la app: se sube un servicio como paquete `.celaut.bee` desde el panel
+(**Servicio OCR**) o con `POST /ocr-service`. Sin servicio activo, el OCR de tickets falla con un
+mensaje claro y el resto de la app funciona. Contrato, variables y funcionamiento en
+[docs/ocr-service.md](docs/ocr-service.md).
+
 Los tests de `tests/Feature/Payments` cubren el dinero: cuadre de gastos y ajustes, importación de Revolut (estados, reembolsos, comisiones, divisa, duplicados, céntimos), OCR, stock y analíticas por mes en hora local.
 
 Todas las escrituras críticas se ejecutan dentro de transacciones Laravel. Las consultas pesadas utilizan materialized views. El sistema está preparado para Filament Resources y Actions.

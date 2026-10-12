@@ -35,10 +35,17 @@ return [
         ],
     ],
 
-    'ollama' => [
-        'url' => env('OLLAMA_URL', 'host.docker.internal:11434'),
-        'ocr_model' => env('OLLAMA_OCR_MODEL', 'glm-ocr'),
-        'timeout' => (int) env('OLLAMA_TIMEOUT', 1200),
+    // Servicio OCR: el paquete .celaut.bee lo sube el usuario (OcrProviderManager) y lo
+    // lanza el controlador local del entrypoint. Contrato en docs/ocr-service.md.
+    'ocr' => [
+        // Override: URL base de un servicio OCR ya levantado (desarrollo con Docker, tests).
+        'url' => env('OCR_SERVICE_URL'),
+        // Controlador local de pf-entrypoint que lanza/para los servicios en el nodo Celaut.
+        'control_url' => env('PF_CONTROL_URL'),
+        // Segundos. Una petición OCR; debe quedar por debajo del retry_after de la cola.
+        'timeout' => (int) env('OCR_TIMEOUT', 1200),
+        // Segundos. Lanzar el servicio: descarga de bloques y arranque (modelos pesados).
+        'start_timeout' => (int) env('OCR_START_TIMEOUT', 900),
     ],
 
 ];

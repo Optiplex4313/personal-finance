@@ -27,14 +27,14 @@ class ProcessOcrJob implements ShouldQueue
     public int $tries = 1;
 
     /**
-     * Segundos. Debe superar services.ollama.timeout y quedar por debajo del
+     * Segundos. Debe superar services.ocr.timeout y quedar por debajo del
      * retry_after de la cola; si no, otro worker podría coger el mismo OCR a la vez.
      */
     public int $timeout;
 
     public function __construct(public string $ocrJobId)
     {
-        $this->timeout = (int) config('services.ollama.timeout', 1200) + 60;
+        $this->timeout = (int) config('services.ocr.timeout', 1200) + 60;
     }
 
     public function handle(OcrService $ocrService): void
@@ -49,7 +49,7 @@ class ProcessOcrJob implements ShouldQueue
 
         $ocrJob->forceFill([
             'started_at' => now(),
-            'model' => $ocrService->getOcrModel(),
+            'model' => $ocrService->getOcrServiceLabel(),
         ])->save();
 
         try {

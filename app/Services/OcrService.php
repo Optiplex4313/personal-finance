@@ -11,16 +11,18 @@ use App\Models\Expense;
 use App\Models\ExpenseItem;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
-use Illuminate\Support\Facades\Process;
 
 class OcrService
 {
 
-    public function __construct(private BalanceExpensesService $balance_expenses_service)
-    {
+    public function __construct(
+        private BalanceExpensesService $balance_expenses_service,
+        private OcrProviderManager $providers,
+    ) {
     }
 
     /**
@@ -28,9 +30,12 @@ class OcrService
      */
     private const LOG_PREFIX = '[OcrService]';
 
-    public function getOcrModel(): string
+    /**
+     * Servicio OCR que se usará, para dejarlo registrado en el OcrJob.
+     */
+    public function getOcrServiceLabel(): ?string
     {
-        return $this->ocrModel();
+        return $this->providers->activeLabel();
     }
 
     public function importExpenseItemsFromTicketOcr(Expense $expense): int
@@ -145,135 +150,80 @@ class OcrService
     private function extractTicketItems(Expense $expense): array
     {
         $startTime = microtime(true);
-        $expenseId = $expense->id; // Puede ser string o int
+        $expenseId = $expense->id;
 
         Log::info(self::LOG_PREFIX . ' Iniciando extracción OCR', [
             'expense_id' => $expenseId,
             'expense_total' => $expense->total,
-            'timestamp' => now()->toISOString(),
+            'service' => $this->providers->activeLabel(),
         ]);
 
         try {
             $ticketHash = trim((string) $expense->ticket_photo_hash);
 
             if ($ticketHash === '') {
-                Log::error(self::LOG_PREFIX . ' El gasto no tiene foto de ticket', [
-                    'expense_id' => $expenseId,
-                ]);
                 throw new RuntimeException('El gasto no tiene foto de ticket.');
             }
 
-            Log::debug(self::LOG_PREFIX . ' Hash del ticket', [
-                'expense_id' => $expenseId,
-                'ticket_hash' => $ticketHash,
-            ]);
-
-            $scriptPath = base_path('scripts/ocr.sh');
-
-            if (!is_file($scriptPath)) {
-                Log::error(self::LOG_PREFIX . ' Script OCR no encontrado', [
-                    'expense_id' => $expenseId,
-                    'script_path' => $scriptPath,
-                ]);
-                throw new RuntimeException("No se encontró el script OCR en {$scriptPath}.");
+            if (! Storage::disk('local')->exists($ticketHash)) {
+                throw new RuntimeException("No se encontró el ticket: {$ticketHash}.");
             }
 
-            if (!is_executable($scriptPath)) {
-                Log::error(self::LOG_PREFIX . ' Script OCR sin permisos de ejecución', [
-                    'expense_id' => $expenseId,
-                    'script_path' => $scriptPath,
-                ]);
-                throw new RuntimeException("El script OCR no es ejecutable: {$scriptPath}.");
+            $baseUrl = $this->providers->baseUrl();
+
+            if ($baseUrl === null) {
+                throw new RuntimeException('No hay ningún servicio OCR activo. Sube un archivo .celaut.bee en "Servicio OCR".');
             }
 
-            $absolutePath = Storage::disk('local')->path($ticketHash);
-            $fileExists = Storage::disk('local')->exists($ticketHash);
-            $fileSize = $fileExists ? @filesize($absolutePath) : false;
-            $fileSizeValue = $fileSize !== false ? $fileSize : 0;
+            $response = Http::timeout((int) config('services.ocr.timeout'))
+                ->acceptJson()
+                ->withBody(Storage::disk('local')->get($ticketHash), $this->ticketMimeType($ticketHash))
+                ->post($baseUrl . '/ocr');
 
-            Log::debug(self::LOG_PREFIX . ' Información del ticket', [
-                'expense_id' => $expenseId,
-                'ticket_hash' => $ticketHash,
-                'resolved_path' => $absolutePath,
-                'file_exists' => $fileExists,
-                'file_size_bytes' => $fileSizeValue,
-                'file_size_mb' => round($fileSizeValue / 1024 / 1024, 2),
-                'script_path' => $scriptPath,
-            ]);
-
-            $processStartTime = microtime(true);
-            $command = sprintf('%s %s', escapeshellarg($scriptPath), escapeshellarg($ticketHash));
-
-            Log::info(self::LOG_PREFIX . ' Ejecutando script OCR', [
-                'expense_id' => $expenseId,
-                'command' => $command,
-                'model' => $this->ocrModel(),
-                'url' => $this->generateUrl(),
-            ]);
-
-            $result = Process::path(base_path())
-                ->forever()
-                ->env([
-                    'OCR_OLLAMA_URL' => $this->generateUrl(),
-                    'OCR_OLLAMA_MODEL' => $this->ocrModel(),
-                ])
-                ->run($command);
-
-            $stdout = trim($result->output());
-            $stderr = trim($result->errorOutput());
-            $exitCode = $result->exitCode();
-            $processDuration = round((microtime(true) - $processStartTime) * 1000, 2);
-
-            Log::debug(self::LOG_PREFIX . ' Script OCR finalizado', [
-                'expense_id' => $expenseId,
-                'exit_code' => $exitCode,
-                'duration_ms' => $processDuration,
-                'stdout_preview' => $this->trimForError($stdout),
-                'stderr_preview' => $this->trimForError($stderr),
-            ]);
-
-            if ($exitCode !== 0) {
+            if (! $response->successful()) {
                 throw new RuntimeException(sprintf(
-                    'El script OCR falló (exit code %d): %s',
-                    $exitCode,
-                    $this->trimForError($stderr !== '' ? $stderr : $stdout)
+                    'El servicio OCR falló (HTTP %d): %s',
+                    $response->status(),
+                    $this->trimForError($response->body())
                 ));
             }
 
-            if ($stdout === '') {
-                throw new RuntimeException('El script OCR no devolvió salida.');
+            $decoded = $response->json();
+
+            if (! is_array($decoded)) {
+                Log::error(self::LOG_PREFIX . ' La respuesta del servicio OCR no es JSON válido', [
+                    'expense_id' => $expenseId,
+                    'content_preview' => $this->trimForError($response->body()),
+                ]);
+                throw new RuntimeException('La respuesta del servicio OCR no es un JSON válido.');
             }
 
-            $decoded = $this->decodeOcrPayload($stdout, $expenseId);
             $this->syncExpenseMetadataFromTicket($expense, $decoded);
             $items = $this->parseResponsePayload($decoded, $expenseId);
-
-            $totalDuration = round((microtime(true) - $startTime) * 1000, 2);
 
             Log::info(self::LOG_PREFIX . ' Extracción OCR completada exitosamente', [
                 'expense_id' => $expenseId,
                 'items_count' => count($items),
-                'total_duration_ms' => $totalDuration,
-                'total_duration_seconds' => round($totalDuration / 1000, 2),
+                'total_duration_seconds' => round(microtime(true) - $startTime, 2),
             ]);
 
             return $items;
 
         } catch (Exception $e) {
-            $totalDuration = round((microtime(true) - $startTime) * 1000, 2);
-
             Log::error(self::LOG_PREFIX . ' Error en extracción OCR', [
                 'expense_id' => $expenseId,
                 'error_message' => $e->getMessage(),
                 'error_class' => get_class($e),
-                'error_file' => $e->getFile(),
-                'error_line' => $e->getLine(),
-                'total_duration_ms' => $totalDuration,
-                'stack_trace' => $e->getTraceAsString(),
+                'total_duration_seconds' => round(microtime(true) - $startTime, 2),
             ]);
 
             throw $e;
         }
+    }
+
+    private function ticketMimeType(string $ticketHash): string
+    {
+        return Storage::disk('local')->mimeType($ticketHash) ?: 'application/octet-stream';
     }
 
     /**
@@ -522,73 +472,6 @@ class OcrService
         return $value;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function decodeOcrPayload(string $content, $expenseId = null): array
-    {
-        $outerDecoded = json_decode(trim($content), true);
-
-        if (!is_array($outerDecoded)) {
-            Log::error(self::LOG_PREFIX . ' La salida del script OCR no es JSON válido', [
-                'expense_id' => $expenseId,
-                'content_preview' => $this->trimForError($content),
-                'json_error' => json_last_error_msg(),
-            ]);
-            throw new RuntimeException('La salida del script OCR no contiene un JSON válido.');
-        }
-
-        Log::debug(self::LOG_PREFIX . ' Payload OCR decodificado', [
-            'expense_id' => $expenseId,
-            'payload_keys' => array_keys($outerDecoded),
-            'done' => $outerDecoded['done'] ?? null,
-            'done_reason' => $outerDecoded['done_reason'] ?? null,
-        ]);
-
-        $response = $outerDecoded['response'] ?? null;
-
-        if (!is_string($response) || trim($response) === '') {
-            Log::error(self::LOG_PREFIX . ' El payload OCR no contiene un campo response válido', [
-                'expense_id' => $expenseId,
-                'payload_keys' => array_keys($outerDecoded),
-                'response_type' => gettype($response),
-            ]);
-            throw new RuntimeException('La respuesta del OCR no contiene el campo "response" esperado.');
-        }
-
-        return $this->decodeJsonFromContent($response, $expenseId);
-    }
-
-    private function generateUrl(): string
-    {
-        $base = config('services.ollama.url', 'http://localhost:11434');
-        $base = trim((string) $base);
-
-        if ($base === '') {
-            $base = 'http://localhost:11434';
-        }
-
-        if (!str_starts_with($base, 'http://') && !str_starts_with($base, 'https://')) {
-            $base = 'http://' . $base;
-        }
-
-        $base = rtrim($base, '/');
-
-        return $base . '/api/generate';
-    }
-
-    private function ocrModel(): string
-    {
-        $model = config('services.ollama.ocr_model', 'glm-ocr');
-        $model = trim((string) $model);
-
-        if ($model === '') {
-            $model = 'glm-ocr';
-        }
-
-        return $model;
-    }
-
     private function trimForError(string $value): string
     {
         $value = trim($value);
@@ -612,161 +495,6 @@ class OcrService
         return $prefix . '…';
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function decodeJsonFromContent(string $content, $expenseId = null): array
-    {
-        $content = trim($content);
-
-        Log::debug(self::LOG_PREFIX . ' Intentando decodificar JSON', [
-            'expense_id' => $expenseId,
-            'content_length' => strlen($content),
-            'content_preview' => $this->trimForError($content),
-        ]);
-
-        // Paso 0: Manejar wrappers tipo {"text": "..."} o {"response": "..."}
-        $wrapperDecoded = json_decode($content, true);
-        if (is_array($wrapperDecoded)) {
-            $wrappedContent = null;
-
-            if (isset($wrapperDecoded['text']) && is_string($wrapperDecoded['text'])) {
-                $wrappedContent = $wrapperDecoded['text'];
-            } elseif (isset($wrapperDecoded['response']) && is_string($wrapperDecoded['response'])) {
-                $wrappedContent = $wrapperDecoded['response'];
-            }
-
-            if (is_string($wrappedContent)) {
-                Log::debug(self::LOG_PREFIX . ' Detectado wrapper JSON con contenido embebido, extrayendo texto', [
-                    'expense_id' => $expenseId,
-                ]);
-                $content = trim($wrappedContent);
-            }
-        }
-
-        // Intento 1: JSON directo
-        $direct = json_decode($content, true);
-        if (is_array($direct)) {
-            Log::debug(self::LOG_PREFIX . ' JSON decodificado directamente', [
-                'expense_id' => $expenseId,
-                'method' => 'direct',
-            ]);
-            return $direct;
-        }
-
-        Log::debug(self::LOG_PREFIX . ' Decodificación directa falló, intentando strip fenced', [
-            'expense_id' => $expenseId,
-            'json_error' => json_last_error_msg(),
-        ]);
-
-        // Intento 2: Quitar bloques de código markdown
-        $stripped = $this->stripFencedJson($content);
-        $fenced = json_decode($stripped, true);
-        if (is_array($fenced)) {
-            Log::debug(self::LOG_PREFIX . ' JSON decodificado después de strip fenced', [
-                'expense_id' => $expenseId,
-                'method' => 'strip_fenced',
-            ]);
-            return $fenced;
-        }
-
-        Log::debug(self::LOG_PREFIX . ' Strip fenced falló, intentando extraer objeto JSON', [
-            'expense_id' => $expenseId,
-            'json_error' => json_last_error_msg(),
-        ]);
-
-        // Intento 3: Extraer primer objeto JSON
-        $extracted = $this->extractFirstJsonObject($content);
-        if ($extracted !== null) {
-            $decoded = json_decode($extracted, true);
-            if (is_array($decoded)) {
-                Log::debug(self::LOG_PREFIX . ' JSON extraído y decodificado', [
-                    'expense_id' => $expenseId,
-                    'method' => 'extract_first_object',
-                    'extracted_length' => strlen($extracted),
-                ]);
-                return $decoded;
-            }
-        }
-
-        Log::error(self::LOG_PREFIX . ' No se pudo parsear el JSON por ningún método', [
-            'expense_id' => $expenseId,
-            'content_preview' => $this->trimForError($content),
-            'json_error' => json_last_error_msg(),
-        ]);
-
-        throw new RuntimeException('No se pudo parsear el JSON del OCR.');
-    }
-
-    private function stripFencedJson(string $content): string
-    {
-        if (preg_match('/```(?:json)?\s*(\{.*\})\s*```/sU', $content, $matches)) {
-            return trim($matches[1]);
-        }
-
-        if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/s', $content, $matches)) {
-            return trim($matches[1]);
-        }
-
-        return $content;
-    }
-
-    private function extractFirstJsonObject(string $content): ?string
-    {
-        $content = trim($content);
-        $length = strlen($content);
-        $start = strpos($content, '{');
-
-        if ($start === false) {
-            return null;
-        }
-
-        $depth = 0;
-        $inString = false;
-        $escape = false;
-
-        for ($i = $start; $i < $length; $i++) {
-            $ch = $content[$i];
-
-            if ($inString) {
-                if ($escape) {
-                    $escape = false;
-                    continue;
-                }
-                if ($ch === '\\') {
-                    $escape = true;
-                    continue;
-                }
-                if ($ch === '"') {
-                    $inString = false;
-                }
-                continue;
-            }
-
-            if ($ch === '"') {
-                $inString = true;
-                continue;
-            }
-
-            if ($ch === '{') {
-                $depth++;
-                continue;
-            }
-
-            if ($ch === '}') {
-                $depth--;
-                if ($depth === 0) {
-                    return substr($content, $start, $i - $start + 1);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param mixed $value
-     */
     private function parseDecimal($value): ?float
     {
         if (is_int($value) || is_float($value)) {

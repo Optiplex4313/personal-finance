@@ -7,13 +7,11 @@ RUN install -d /usr/share/postgresql-common/pgdg \
     && . /etc/os-release \
     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
-# Imagemagick solo necesario en scripts/ocr.sh
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         unzip \
         postgresql-client-18 \
-        imagemagick \
         libpq-dev \
         libzip-dev \
         libicu-dev \

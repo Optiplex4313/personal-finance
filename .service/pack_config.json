@@ -3,8 +3,7 @@
     "metadata_dependencies_directory": "__metadata__",
     "blocks_directory": "__block__",
     "dependencies": {
-        "PF_POSTGRES": "dependencies/pf-postgres",
-        "PF_OLLAMA": "dependencies/pf-ollama"
+        "PF_POSTGRES": "dependencies/pf-postgres"
     },
     "dependencies_env": true,
     "include": [
@@ -15,7 +14,6 @@
         "public",
         "resources",
         "routes",
-        "scripts",
         "artisan",
         "composer.json",
         "composer.lock",

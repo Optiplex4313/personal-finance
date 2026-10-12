@@ -48,9 +48,9 @@
         "QUEUE_CONNECTION",
         "CACHE_STORE",
         "MAIL_MAILER",
-        "OLLAMA_URL",
-        "OLLAMA_OCR_MODEL",
-        "OLLAMA_TIMEOUT",
+        "OCR_SERVICE_URL",
+        "OCR_TIMEOUT",
+        "OCR_START_TIMEOUT",
         "APP_DISPLAY_TIMEZONE",
         "PF_ADMIN_EMAIL",
         "PF_ADMIN_PASSWORD"

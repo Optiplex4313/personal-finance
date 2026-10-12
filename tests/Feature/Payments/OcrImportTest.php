@@ -9,7 +9,7 @@ use App\Models\OcrJob;
 use App\Models\User;
 use App\Services\OcrService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Tests\Concerns\CreatesExpenses;
@@ -30,14 +30,14 @@ class OcrImportTest extends TestCase
 
     private function fakeOcr(array $items, string $establishment = 'Mercadona'): void
     {
-        $response = json_encode([
-            'establishment' => $establishment,
-            'category' => 'Supermercado',
-            'items' => $items,
-        ]);
+        config(['services.ocr.url' => 'http://ocr.test']);
 
-        Process::fake([
-            '*' => Process::result(output: json_encode(['response' => $response, 'done' => true])),
+        Http::fake([
+            'ocr.test/ocr' => Http::response([
+                'establishment' => $establishment,
+                'category' => 'Supermercado',
+                'items' => $items,
+            ]),
         ]);
     }
 
@@ -147,12 +147,31 @@ class OcrImportTest extends TestCase
         $this->assertSame(1, $user->notifications()->count());
     }
 
-    public function test_job_is_not_retried_and_has_a_timeout_above_ollama_timeout(): void
+    public function test_job_is_not_retried_and_has_a_timeout_above_ocr_timeout(): void
     {
         $job = new ProcessOcrJob('x');
 
         $this->assertSame(1, $job->tries);
-        $this->assertGreaterThan((int) config('services.ollama.timeout'), $job->timeout);
+        $this->assertGreaterThan((int) config('services.ocr.timeout'), $job->timeout);
         $this->assertGreaterThan($job->timeout, (int) config('queue.connections.database.retry_after'));
+    }
+
+    public function test_fails_clearly_without_an_ocr_service(): void
+    {
+        config(['services.ocr.url' => null]);
+        $expense = $this->expenseWithTicket('4.00');
+
+        $this->expectExceptionMessage('No hay ningún servicio OCR activo');
+
+        app(OcrService::class)->importExpenseItemsFromTicketOcr($expense);
+    }
+
+    public function test_sends_the_ticket_image_to_the_ocr_endpoint(): void
+    {
+        $this->fakeOcr([['concept' => 'Leche', 'quantity' => 1, 'unit_price' => 1.00]]);
+
+        app(OcrService::class)->importExpenseItemsFromTicketOcr($this->expenseWithTicket('1.00'));
+
+        Http::assertSent(fn ($request) => $request->url() === 'http://ocr.test/ocr' && $request->body() === 'fake');
     }
 }

@@ -38,7 +38,7 @@ class OcrJobsTable
                     ->label('Solicitado por')
                     ->toggleable(),
                 TextColumn::make('model')
-                    ->label('Modelo')
+                    ->label('Servicio OCR')
                     ->toggleable(),
                 TextColumn::make('items_imported')
                     ->label('Lineas')

@@ -37,6 +37,7 @@ class PanelPagesTest extends TestCase
             '/analisis-gastos',
             '/stock',
             '/ocr-jobs',
+            '/ocr-service',
         ] as $url) {
             $this->get($url)->assertOk();
         }

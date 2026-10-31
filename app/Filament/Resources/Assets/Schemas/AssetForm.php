@@ -3,11 +3,13 @@
 namespace App\Filament\Resources\Assets\Schemas;
 
 use App\Enums\AssetType;
+use App\Enums\InstrumentType;
 use App\Filament\Resources\BankAccounts\Schemas\BankAccountForm;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
 
 class AssetForm
 {
@@ -40,6 +42,18 @@ class AssetForm
             ->numeric()
             ->prefix('€')
             ->required();
+        $components[] = Select::make('instrument_id')
+            ->label('Instrumento de mercado')
+            ->helperText('Enlaza el activo con un instrumento para ver su gráfico y su liquidez en Mercado.')
+            ->relationship('instrument', 'name', fn (Builder $query) => $query->where('type', '!=', InstrumentType::CRYPTO->value)->orderBy('symbol'))
+            ->searchable()
+            ->preload();
+        $components[] = TextInput::make('units')
+            ->label('Participaciones / títulos')
+            ->helperText('Cuántas unidades tienes; se usa para calcular los días necesarios para liquidar la posición.')
+            ->numeric()
+            ->step('0.00000001')
+            ->minValue(0);
         $components[] = TextInput::make('currency')
             ->label('Moneda')
             ->default('EUR')

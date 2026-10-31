@@ -3,6 +3,9 @@
 namespace App\Filament\Resources\CryptoAccounts\Tables;
 
 use App\Enums\CryptoTaxStatus;
+use App\Filament\Pages\Market;
+use App\Models\CryptoAccount;
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -58,6 +61,11 @@ class CryptoAccountsTable
                     ->options(CryptoTaxStatus::class),
             ])
             ->recordActions([
+                Action::make('chart')
+                    ->label('Ver gráfico')
+                    ->icon('heroicon-o-chart-bar')
+                    ->visible(fn (CryptoAccount $record): bool => $record->instrument_id !== null)
+                    ->url(fn (CryptoAccount $record): string => Market::getUrl(['instrumentId' => $record->instrument_id])),
                 ViewAction::make(),
                 EditAction::make(),
                 DeleteAction::make(),

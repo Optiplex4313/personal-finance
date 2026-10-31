@@ -3,10 +3,12 @@
 namespace App\Filament\Resources\CryptoAccounts\Schemas;
 
 use App\Enums\CryptoTaxStatus;
+use App\Enums\InstrumentType;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
 
 class CryptoAccountForm
 {
@@ -34,6 +36,12 @@ class CryptoAccountForm
                 ->numeric()
                 ->step('0.00000001')
                 ->required(),
+            Select::make('instrument_id')
+                ->label('Instrumento de mercado')
+                ->helperText('Enlaza la cuenta con una criptomoneda para ver su gráfico y su liquidez en Mercado.')
+                ->relationship('instrument', 'name', fn (Builder $query) => $query->where('type', InstrumentType::CRYPTO->value)->orderBy('symbol'))
+                ->searchable()
+                ->preload(),
             TextInput::make('current_value_eur')
                 ->label('Valor actual estimado')
                 ->numeric()

@@ -3,6 +3,9 @@
 namespace App\Filament\Resources\Assets\Tables;
 
 use App\Enums\AssetType;
+use App\Filament\Pages\Market;
+use App\Models\Asset;
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -51,6 +54,11 @@ class AssetsTable
                     ->options(AssetType::class),
             ])
             ->recordActions([
+                Action::make('chart')
+                    ->label('Ver gráfico')
+                    ->icon('heroicon-o-chart-bar')
+                    ->visible(fn (Asset $record): bool => $record->instrument_id !== null)
+                    ->url(fn (Asset $record): string => Market::getUrl(['instrumentId' => $record->instrument_id])),
                 ViewAction::make(),
                 EditAction::make(),
                 DeleteAction::make(),
